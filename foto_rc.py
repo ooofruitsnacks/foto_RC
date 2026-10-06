@@ -19,11 +19,8 @@ try:
 except ImportError:
     HAS_HEIF = False
 
-try:
-    import rawpy
-    HAS_RAW = True
-except ImportError:
-    HAS_RAW = False
+import importlib.util
+HAS_RAW = importlib.util.find_spec("rawpy") is not None  # checks without loading it
 
 from PySide6.QtCore import (Qt, QTimer, QThread, Signal, Property, QPointF, QRectF, QUrl,
                             QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup)
@@ -104,6 +101,7 @@ def load_image(path, preview=False):
     if ext in RAW_EXTS:
         if not HAS_RAW:
             raise RuntimeError("install 'rawpy' to open RAW files")
+        import rawpy
         with rawpy.imread(path) as raw:
             if preview:  # embedded JPEG thumbnail = instant preview
                 try:
@@ -130,6 +128,7 @@ def load_image(path, preview=False):
 
 def probe_size(path):
     if Path(path).suffix.lower() in RAW_EXTS and HAS_RAW:
+        import rawpy
         with rawpy.imread(path) as raw:
             s = raw.sizes
             return (s.height, s.width) if s.flip in (5, 6) else (s.width, s.height)
@@ -141,7 +140,6 @@ def probe_size(path):
         except Exception:
             pass
         return w, h
-
 
 def normalize_mode(img):
     m = img.mode
