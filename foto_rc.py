@@ -1109,7 +1109,7 @@ class FotoRC(QMainWindow):
             self.toast.pop("No output formats available — check your Pillow install")
             return
         if not self.files:
-            self.toast.pop("Add some photos first ✨")
+            self.toast.pop("Add some photos first")
             return
         self.worker = ConvertWorker(list(self.files), self.spec(), self.scale.value(),
                                     self.quality.value(), self.out_dir)

@@ -74,7 +74,7 @@ def make_splash(dpr, progress, message):
     small.setPointSize(12)
     p.setFont(small)
     p.setPen(QColor(255, 255, 255, 150))
-    p.drawText(QRectF(98, 86, 300, 20), Qt.AlignLeft, "glass-smooth photo converter")
+    p.drawText(QRectF(98, 86, 300, 20), Qt.AlignLeft, "Foto Resize & Convert")
 
     # Status text + progress bar
     p.setPen(QColor(255, 255, 255, 200))
