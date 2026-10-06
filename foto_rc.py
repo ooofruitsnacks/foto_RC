@@ -523,7 +523,7 @@ class GlowButton(QPushButton):
         p.setPen(QPen(QColor(255, 255, 255, 130), 1))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
-        p.setPen(QColor(255, 255, 255, 255 if on else 150))
+        p.setPen(QColor(255, 0, 0, 255 if on else 150))
         p.setFont(self.font())
         p.drawText(r, Qt.AlignCenter, self.text())
 
@@ -1062,7 +1062,7 @@ class FotoRC(QMainWindow):
         added = [n for n in new if not (n in seen or seen.add(n))]
         self.files += added
         if not added:
-            self.toast.pop("No supported photos found in that drop 🤔")
+            self.toast.pop("No supported photos found in that drop")
         self._refresh_files()
 
     def clear_files(self):
@@ -1078,7 +1078,7 @@ class FotoRC(QMainWindow):
             self.drop.preview.setPixmap(QPixmap())
             self.drop.preview.setText("↑")
             self.drop.title.setText("Drop photos here")
-            self.drop.sub.setText("or click to browse · folders work too")
+            self.drop.sub.setText("or click to browse · folders work too :)")
             self._update_scale()
             return
         first = self.files[0]
