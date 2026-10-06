@@ -1,14 +1,18 @@
-/public/
-
-.DS_Store
-
+# Python-generated files
 __pycache__/
 *.py[cod]
 
+# Local environment
 .venv/
 
+# Build and release output
 build/
 dist/
+.packaging/
+release/
 
+# Local logs and backups
 *.log
 *.bak
+.DS_Store
+
