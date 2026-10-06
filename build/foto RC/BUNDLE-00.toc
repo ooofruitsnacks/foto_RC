@@ -1,0 +1,1 @@
+([('foto RC', '/Users/owenmacpro/fotoRC/dist/foto RC', 'EXECUTABLE')],)
