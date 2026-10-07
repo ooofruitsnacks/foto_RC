@@ -17,7 +17,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 120
 
     strategy:
       fail-fast: false
@@ -88,11 +88,73 @@ jobs:
           launcher.py
           release_entry.py
           scripts/build_release.py
-
+      - name: Install macOS signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          
+          : "${BUILD_CERTIFICATE_BASE64:?Missing BUILD_CERTIFICATE_BASE64}"
+          : "${P12_PASSWORD:?Missing P12_PASSWORD}"
+          : "${KEYCHAIN_PASSWORD:?Missing KEYCHAIN_PASSWORD}"
+                                                                                                            
+          CERTIFICATE_PATH="$RUNNER_TEMP/build-certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+                                                                                                                                
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" \
+            | base64 --decode > "$CERTIFICATE_PATH"
+                                                                                                                                                      
+          security create-keychain \
+            -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+                                                                                                                                                                            
+          security set-keychain-settings \
+            -lut 21600 "$KEYCHAIN_PATH"
+                                                                                                                                                                                                  
+          security unlock-keychain \
+            -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          
+          security import "$CERTIFICATE_PATH" \
+            -P "$P12_PASSWORD" \
+            -k "$KEYCHAIN_PATH" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          
+          # Install Apple's public Developer ID intermediate certificate.
+          curl --fail --silent --show-error --location \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+            --output "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+            
+          security add-certificates \
+            -k "$KEYCHAIN_PATH" "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+                      
+          security list-keychains -d user -s \
+            "$KEYCHAIN_PATH" "$HOME/Library/Keychains/login.keychain-db"
+          
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | tee "$RUNNER_TEMP/signing-identities.txt"
+          
+          grep -F \
+            'Developer ID Application: Owen Edwards (5QQP2F82BF)' \
+            "$RUNNER_TEMP/signing-identities.txt"
+          
+          rm -f "$CERTIFICATE_PATH"
+          
       - name: Build, test, and package
         env:
           BUILD_TARGET: ${{ matrix.target }}
           RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'test' }}
+          MACOS_SIGNING_IDENTITY: "Developer ID Application: Owen Edwards (5QQP2F82BF)"
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
         run: python scripts/build_release.py
 
       - name: Upload packaged files
@@ -103,6 +165,17 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      - name: Clean up macOS signing credentials
+        if: ${{ always() && runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          security delete-keychain \
+            "$RUNNER_TEMP/app-signing.keychain-db" || true
+
+          rm -f \
+            "$RUNNER_TEMP/build-certificate.p12" \
+            "$RUNNER_TEMP/DeveloperIDG2CA.cer"
 
   publish:
     name: Publish GitHub Release
@@ -183,9 +256,10 @@ jobs:
           Linux builds target Ubuntu 24.04-class desktop systems.
           macOS builds are built and smoke-tested on macOS 15.
 
-          These initial builds are not Developer ID signed/notarized on
-          macOS and are not publisher-signed on Windows. OS security
+          macOS builds are Developer ID signed and notarized by Apple.
+          Windows builds are not publisher-signed; Windows security 
           warnings or restrictions may apply.
+
 
           SHA256SUMS.txt contains download checksums.
           The dependencies files record the build environments.

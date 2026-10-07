@@ -44,6 +44,27 @@ def main():
     work = packaging / "work"
     spec = packaging / "spec"
     spec.mkdir()
+    macos_options = []
+
+    if sys.platform == "darwin":
+        required = (
+            "MACOS_SIGNING_IDENTITY",
+            "APPLE_ID",
+            "APPLE_TEAM_ID",
+            "APPLE_APP_SPECIFIC_PASSWORD",
+        )
+        missing = [name for name in required if not os.environ.get(name)]
+        if missing:
+            raise RuntimeError(
+                "Missing macOS release settings: " + ", ".join(missing)
+            )
+
+        macos_options = [
+            "--codesign-identity",
+            os.environ["MACOS_SIGNING_IDENTITY"],
+            "--osx-bundle-identifier",
+            "com.ooofruitsnacks.foto-rc",
+        ]
 
     run(
         sys.executable,
@@ -67,6 +88,7 @@ def main():
         "pillow_heif",
         "--collect-submodules",
         "PIL",
+        *macos_options,
         ROOT / "release_entry.py",
     )
 
@@ -108,14 +130,119 @@ def main():
     base = f"foto-RC-py-{version}-{target}"
 
     if sys.platform == "darwin":
-        # -y preserves symbolic links inside the application bundle.
+        # Verify the signed app before sending it to Apple.
+        run(
+            "codesign",
+            "--verify",
+            "--deep",
+            "--strict",
+            "--verbose=2",
+            bundle,
+        )
+
+        # Keep the submission ZIP outside release/ so it is not published.
+        submission_zip = packaging / f"{base}-notarization.zip"
+        run(
+            "ditto",
+            "-c",
+            "-k",
+            "--keepParent",
+            bundle,
+            submission_zip,
+        )
+
+        # Read credentials from Actions secrets, not from committed files.
+        notary_auth = [
+            "--apple-id",
+            os.environ["APPLE_ID"],
+            "--team-id",
+            os.environ["APPLE_TEAM_ID"],
+            "--password",
+            os.environ["APPLE_APP_SPECIFIC_PASSWORD"],
+        ]
+
+        print("Submitting the signed app to Apple for notarization...", flush=True)
+
+        result = subprocess.run(
+            [
+                "xcrun",
+                "notarytool",
+                "submit",
+                str(submission_zip),
+                *notary_auth,
+                "--wait",
+                "--timeout",
+                "60m",
+                "--output-format",
+                "json",
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+
+        # Apple returns the submission ID and status, not the credentials.
+        print(result.stdout, flush=True)
+
+        try:
+            submission = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            raise RuntimeError(
+                "Apple did not return a notarization JSON result. "
+                "Check the workflow output above."
+            ) from None
+
+        submission_id = submission.get("id")
+        status = submission.get("status")
+
+        # Download Apple's diagnostic log for completed submissions.
+        if submission_id and status in {"Accepted", "Invalid", "Rejected"}:
+            log_path = packaging / "notarization-log.json"
+            log_result = subprocess.run(
+                [
+                    "xcrun",
+                    "notarytool",
+                    "log",
+                    submission_id,
+                    *notary_auth,
+                    str(log_path),
+                ],
+                check=False,
+            )
+            if log_result.returncode == 0 and log_path.exists():
+                print(log_path.read_text(encoding="utf-8"), flush=True)
+
+        if result.returncode != 0 or status != "Accepted":
+            raise RuntimeError(
+                f"Notarization did not succeed: status={status!r}, "
+                f"submission_id={submission_id!r}. "
+                "Do not publish this build."
+            )
+
+        # Attach Apple's ticket to the app, not to the ZIP.
+        run("xcrun", "stapler", "staple", bundle)
+        run("xcrun", "stapler", "validate", bundle)
+
+        # Check the final app's signature and Gatekeeper assessment.
+        run("codesign", "--verify", "--deep", "--strict", bundle)
+        run(
+            "spctl",
+            "--assess",
+            "--type",
+            "execute",
+            "--verbose=2",
+            bundle,
+        )
+
+        # Create the release ZIP AFTER stapling.
         archive = output / f"{base}.zip"
         run(
-            "zip",
-            "-qry",
+            "ditto",
+            "-c",
+            "-k",
+            "--keepParent",
+            bundle,
             archive,
-            bundle.name,
-            cwd=dist,
         )
 
     elif sys.platform == "win32":
